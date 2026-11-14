@@ -255,11 +255,33 @@ branch: a run whose branch disappears while it is starting is reported as failed
 
 ### Releasing
 
-HACS shows the version of a GitHub release, and commit hashes when there is none.
-To release, set the same version in `custom_components/android_debug_bridge_usb/manifest.json`
-and in a tag, then publish a release for that tag:
+HACS and Home Assistant show the version of the latest GitHub **release**; a
+tag alone is not enough, and without any release HACS shows commit hashes.
+Versions follow `MAJOR.MINOR.PATCH`; the release tag is that version prefixed
+with `v`.
 
-```sh
-git tag v0.5.0 && git push origin v0.5.0
-gh release create v0.5.0 --generate-notes
-```
+1. On `main`, set the new version in
+   `custom_components/android_debug_bridge_usb/manifest.json` (`"version"`),
+   open a pull request, wait for the checks and merge it.
+2. Pull `main`, then tag the merge commit and push the tag:
+
+   ```sh
+   git checkout main && git pull
+   git tag v0.5.0 && git push origin v0.5.0
+   ```
+
+3. Publish a release for that tag, either with the GitHub CLI:
+
+   ```sh
+   gh release create v0.5.0 --title v0.5.0 --generate-notes
+   ```
+
+   or on GitHub: **Releases → Draft a new release**, choose the tag, click
+   **Generate release notes**, and **Publish release**. List breaking changes
+   (renamed action fields, removed options) at the top of the notes.
+4. In Home Assistant, HACS reports the update within a few hours (or after
+   **Redownload** on the integration); the installed version appears on the
+   integration's page.
+
+To fix a mistake before anyone installed it, delete the release and the tag,
+then recreate both; never move an existing tag to another commit.
