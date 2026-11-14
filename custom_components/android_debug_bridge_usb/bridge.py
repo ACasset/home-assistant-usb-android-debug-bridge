@@ -27,6 +27,9 @@ _TRANSPORT_ERRORS = (
 
 
 _UI_DUMP_FILE = "/data/local/tmp/adb_usb_window.xml"
+# "Send" as a whole word, not "STATUS_SENDING"; Compose ids look like "Compose:Draft:Send".
+_SEND_ID = re.compile(r"(?<![A-Za-z])[Ss]end(?![a-z])|(?<![A-Za-z])SEND(?![A-Z])")
+
 # uiautomator exits 0 even when it fails, so remove the file first: a failed dump
 # must yield no hierarchy rather than the previous screen.
 _UI_DUMP_COMMAND = (
@@ -525,9 +528,7 @@ class Bridge:
         ]
         detected = {
             bounds for node, bounds in usable
-            if re.search(
-                "send", node.get("resource-id", "").rpartition("/")[2], re.IGNORECASE
-            )
+            if _SEND_ID.search(node.get("resource-id", "").rpartition("/")[2])
         }
         if not detected:
             # Fallback on the (localized) label, e.g. "Envoyer" on a French phone.

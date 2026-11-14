@@ -35,7 +35,7 @@ class FakePhone:
 
     def __init__(
         self, draft="", send_id="com.sms:id/send_button", prefill=True, sends=True,
-        awake=True, dump_ok=True, package="com.sms",
+        awake=True, dump_ok=True, package="com.sms", extra="",
     ):
         self.text = draft
         self.send_id = send_id
@@ -44,6 +44,7 @@ class FakePhone:
         self.awake = awake
         self.dump_ok = dump_ok
         self.package = package
+        self.extra = extra
         self.commands = []
         self.taps = []
         self.sent = []
@@ -73,6 +74,7 @@ class FakePhone:
                     + self.node("android.widget.ImageButton", (0, 1600, 100, 1700))
                     + self.node("android.widget.EditText", self.FIELD, self.text)
                     + self.node("android.widget.ImageButton", self.SEND, resource_id=self.send_id)
+                    + self.extra
                     + "</hierarchy>"
                 )
         elif command.startswith("input tap"):
@@ -407,6 +409,17 @@ class BridgeTests(unittest.TestCase):
             patch.object(bridge.time, "sleep"),
         ):
             return self.bridge.send_sms("phone", "+123456789", message, **overrides)
+
+    def test_compose_send_id_wins_over_sending_status_node(self):
+        phone = FakePhone(send_id="Compose:Draft:Send")
+        phone.extra = phone.node(
+            "android.view.View", (957, 1085, 999, 1127), resource_id="STATUS_SENDING",
+            clickable=False,
+        )
+        self.assertEqual(
+            self.send(phone)["send_button"], "detected",
+        )
+        self.assertEqual(phone.taps, [(950, 1800)])
 
     def test_sms_quotes_message_and_taps_detected_button(self):
         message = "Panne internet ! 'hello'; $(touch /tmp/not-executed)\n<Vérifiez> & \"é\""
