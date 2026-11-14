@@ -34,7 +34,7 @@ your configuration directory's `custom_components` folder and restart.
    On Home Assistant OS, if enumeration fails, check Core's USB access.
 4. Open **Developer tools → Actions** and run `android_debug_bridge_usb.shell`
    with the command `getprop ro.product.model` (with a single phone connected, no
-   serial is needed). Unlock the phone and accept **Allow USB debugging?**.
+   phone needs to be selected). Unlock the phone and accept **Allow USB debugging?**.
    If authorization times out, approve and retry.
 5. Optionally choose a **default phone**: open **Settings → Devices & services →
    Android Debug Bridge USB → Configure** and pick it in the list, which shows
@@ -43,15 +43,14 @@ your configuration directory's `custom_components` folder and restart.
 
 ### Which phone an action targets
 
-`serial` is optional in `shell` and `send_sms`. An action uses, in this order:
-the `serial` it is given, the default phone chosen with **Configure**, or the
-only connected phone. With no serial, no default and zero or several phones
+The **Phone** field of `shell` and `send_sms` is a dropdown of the phones
+discovered by the integration (in YAML, `device_id` is the Home Assistant device
+ID shown by that dropdown). It is optional: an action uses, in this order, the
+phone it is given, the default phone chosen with **Configure**, or the only
+connected phone. With no phone selected, no default and zero or several phones
 connected, it fails without running anything. A default phone that is unplugged
-is never silently replaced by another one.
-
-If you do pass a serial in YAML, quote it (`serial: "0123456789"`): unquoted,
-a serial made of digits is read as a number and may no longer match. When no
-phone matches, the error lists the serials that are connected.
+is never silently replaced by another one. When the selected phone is not
+connected, the error lists the serials that are connected.
 
 **USB connected** reports USB presence, not ADB authorization. Disconnected
 phones turn off; enumeration failures make sensors unavailable. A phone whose
@@ -78,7 +77,7 @@ returns `{"devices": [{"serial": "ABC123", "port_path": [1, 2], "model": "Pixel 
 (`model` is `null` until the phone has authorized USB debugging).
 
 `android_debug_bridge_usb.shell` accepts a `command`
-(1-8192 characters, without `adb shell`) and an optional exact `serial`. It optionally returns
+(1-8192 characters, without `adb shell`) and an optional phone. It optionally returns
 `{"output": "...", "exit_code": 0}`. `exit_code` is the Android exit status of
 the command (0 means success), or `null` if the phone did not report it. The
 action does not fail on a nonzero status; test it in your automation, for
@@ -131,9 +130,9 @@ Do not use it as the sole channel for critical alerts. Each attempt:
    left by an earlier failed attempt, that text is deleted and the composer is
    reopened once. If the message still is not there (wrong screen, dialog, app
    chooser, or an app that ignores prefilled text), it stops: nothing is tapped.
-4. Taps Send once. The button is located on screen by its identifier; if it
-   cannot be identified, `send_x`/`send_y` are used, but only if they point at a
-   button of the SMS app. Otherwise it stops without tapping.
+4. Taps Send once. The button is located on screen by its identifier (a view of
+   the SMS app whose resource id contains the word "send"). If it cannot be
+   identified unambiguously, it stops without tapping.
 5. Reads the screen again. If your message is still in the composer, the action
    fails with "probably not sent".
 
@@ -144,13 +143,9 @@ sent. Errors ending with "Nothing was sent." are safe to retry; for any other
 error, check the phone first. Action errors include the underlying cause.
 
 It returns `{"status": "send_button_tapped", "delivery_confirmed": false,
-"send_button": "detected", "composer_cleared": true}`. `send_button` is
-`detected` or `coordinates`; `composer_cleared` is `true` when the message left
+"composer_cleared": true}`. `composer_cleared` is `true` when the message left
 the composer, or `null` if the screen could not be re-read after the tap.
 Neither proves that the network accepted or delivered the SMS.
-
-If screen reading does not work on your phone, set `verify_ui: false` to tap
-`send_x`/`send_y` blindly after the wait, without any of the checks above.
 
 Prepare a dedicated phone:
 
@@ -160,20 +155,17 @@ Prepare a dedicated phone:
 2. Keep the phone powered, USB debugging authorized, and without a PIN, pattern
    or password: the action **does not bypass a secure lock screen**. A phone
    without a lock has security implications; restrict physical access.
-3. Test `send_sms` manually with your own number and `confirm_ui_risk: true`,
-   first without coordinates. If it reports that the Send button cannot be
-   identified, open a test message, enable Android Developer options'
-   **Pointer location** to find the button's X/Y pixel coordinates, and pass them
-   as `send_x` and `send_y`. Increase `wait_seconds` (1-10, default 3) if the
-   composer is slow to open.
+3. Test `send_sms` manually with your own number and `confirm_ui_risk: true`.
+   If it reports that the Send button cannot be identified, your SMS app is not
+   supported; Google Messages is known to work. Increase `wait_seconds` (1-10,
+   default 3) if the composer is slow to open.
    Verify the recipient, message, actual SMS receipt, and behavior after sleep.
 4. Test again with the regular internet disconnected and Wi-Fi off on the phone.
    ADB still works over USB; cellular SMS service must remain available.
 
 Example automation, using an **existing internet-connectivity binary sensor**
-(replace its entity ID and recipient; add `serial` if you have several phones
-and no default phone; `send_x`/`send_y` are only
-needed if your Send button is not identified automatically):
+(replace its entity ID and recipient; add `device_id` if you have several phones
+and no default phone):
 
 ```yaml
 alias: SMS when internet is lost
@@ -189,8 +181,6 @@ actions:
     data:
       recipient: "+15551234567"
       message: "Home Assistant: regular internet has been offline for 2 minutes."
-      send_x: 980
-      send_y: 1820
       wait_seconds: 3
       confirm_ui_risk: true
     response_variable: sms_attempt
@@ -259,3 +249,17 @@ also be verified on the Home Assistant host with a connected phone.
 GitHub Actions runs these tests, Home Assistant's `hassfest` and the HACS
 validation on every pull request, on pushes to `main`, and weekly. The HACS
 validation skips the license check because the repository has no license yet.
+Wait for the pull request checks to finish before merging and deleting the
+branch: a run whose branch disappears while it is starting is reported as failed
+("workflow file issue") even though nothing is wrong with the workflow.
+
+### Releasing
+
+HACS shows the version of a GitHub release, and commit hashes when there is none.
+To release, set the same version in `custom_components/android_debug_bridge_usb/manifest.json`
+and in a tag, then publish a release for that tag:
+
+```sh
+git tag v0.5.0 && git push origin v0.5.0
+gh release create v0.5.0 --generate-notes
+```

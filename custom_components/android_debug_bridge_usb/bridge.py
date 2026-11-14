@@ -304,24 +304,13 @@ class Bridge:
         serial: str,
         recipient: str,
         message: str,
-        send_x: int | None = None,
-        send_y: int | None = None,
         wait_seconds: float = 3,
-        verify_ui: bool = True,
     ) -> dict:
         """Attempt one UI send; a completed tap is not proof of SMS delivery."""
         if not re.fullmatch(r"\+?[0-9]{3,15}", recipient):
             raise ValueError("Use one phone number with 3-15 digits and an optional +.")
         if not message.strip() or len(message) > 1600 or "\0" in message:
             raise ValueError("Enter a message of 1-1600 characters without NUL bytes.")
-        if (send_x is None) != (send_y is None):
-            raise ValueError("Provide both Send coordinates or neither.")
-        if send_x is None and not verify_ui:
-            raise ValueError("Send coordinates are required when verify_ui is off.")
-        if send_x is not None and (
-            not 0 <= send_x <= 10000 or not 0 <= send_y <= 10000
-        ):
-            raise ValueError("Send coordinates must be between 0 and 10000.")
         if not 1 <= wait_seconds <= 10:
             raise ValueError("Wait time must be between 1 and 10 seconds.")
         # Recreate the task so an earlier dialog or screen of the app is discarded.
@@ -348,27 +337,23 @@ class Bridge:
                         f"The phone screen did not turn on. {_NOTHING_SENT}"
                     )
                 package = self._open_composer(serial, intent, wait_seconds)
-                if verify_ui:
+                nodes = self._dump_ui(serial)
+                field = self._message_field(nodes, message)
+                if field is None:
+                    self._clear_draft(serial, nodes, package)
+                    self._open_composer(serial, intent, wait_seconds)
                     nodes = self._dump_ui(serial)
                     field = self._message_field(nodes, message)
-                    if field is None:
-                        self._clear_draft(serial, nodes, package)
-                        self._open_composer(serial, intent, wait_seconds)
-                        nodes = self._dump_ui(serial)
-                        field = self._message_field(nodes, message)
-                    if field is None:
-                        raise ValueError(
-                            "The SMS app is not showing the requested message "
-                            "(wrong screen, dialog, or an app that ignores "
-                            f"prefilled text). {_NOTHING_SENT}"
-                        )
-                    package = field.get("package", "")
-                    x, y, source = self._send_target(nodes, package, send_x, send_y)
+                if field is None:
+                    raise ValueError(
+                        "The SMS app is not showing the requested message "
+                        "(wrong screen, dialog, or an app that ignores "
+                        f"prefilled text). {_NOTHING_SENT}"
+                    )
+                package = field.get("package", "")
+                x, y = self._send_button(nodes, package)
             except _UsbFailure as err:
                 raise ValueError(f"{err} {_NOTHING_SENT}") from err
-            if not verify_ui:
-                self._tap_send(serial, send_x, send_y)
-                return {"send_button": "coordinates", "composer_cleared": None}
 
             self._tap_send(serial, x, y)
             time.sleep(2)
@@ -376,13 +361,13 @@ class Bridge:
                 nodes = self._dump_ui(serial)
             except (_UiDumpError, _UsbFailure):
                 _LOGGER.warning("Send was tapped but the screen could not be re-read")
-                return {"send_button": source, "composer_cleared": None}
+                return {"composer_cleared": None}
             if self._message_field(nodes, message, package) is not None:
                 raise ValueError(
                     "Send was tapped but the message is still in the composer, so it "
                     "was probably not sent. Check the phone before retrying."
                 )
-            return {"send_button": source, "composer_cleared": True}
+            return {"composer_cleared": True}
 
     def _step(self, serial: str, command: str) -> str:
         """Run a repeatable SMS step, retrying when the phone cannot be reached.
@@ -515,32 +500,16 @@ class Bridge:
                 raise ValueError(f"Cannot clear the SMS composer: {output}")
 
     @staticmethod
-    def _send_target(
-        nodes: list[dict], package: str, send_x: int | None, send_y: int | None
-    ) -> tuple[int, int, str]:
-        """Choose where to tap: the app's Send button, else verified coordinates."""
-        usable = [
-            (node, bounds) for node in nodes
+    def _send_button(nodes: list[dict], package: str) -> tuple[int, int]:
+        """Locate the app's Send button; nothing is tapped when it is ambiguous."""
+        detected = {
+            bounds for node in nodes
             if node.get("package") == package
             and node.get("enabled") == "true"
             and not _is_text_field(node)
             and (bounds := _bounds(node)) is not None
-        ]
-        detected = {
-            bounds for node, bounds in usable
-            if _SEND_ID.search(node.get("resource-id", "").rpartition("/")[2])
+            and _SEND_ID.search(node.get("resource-id", "").rpartition("/")[2])
         }
-        if not detected:
-            # Fallback on the (localized) label, e.g. "Envoyer" on a French phone.
-            detected = {
-                bounds for node, bounds in usable
-                if node.get("clickable") == "true"
-                and re.fullmatch(
-                    r"(send|envoyer)( sms| message| le message)?",
-                    (node.get("content-desc") or node.get("text") or "").strip(),
-                    re.IGNORECASE,
-                )
-            }
         if detected:
             left, top, right, bottom = min(
                 detected, key=lambda b: (b[2] - b[0]) * (b[3] - b[1])
@@ -550,20 +519,7 @@ class Bridge:
                 b[0] <= left and b[1] <= top and b[2] >= right and b[3] >= bottom
                 for b in detected
             ):
-                return (left + right) // 2, (top + bottom) // 2, "detected"
-        if send_x is None:
-            raise ValueError(
-                "Cannot identify the Send button of the SMS app. Provide send_x and "
-                f"send_y. {_NOTHING_SENT}"
-            )
-        for node, (left, top, right, bottom) in usable:
-            if (
-                node.get("clickable") == "true"
-                and left <= send_x < right
-                and top <= send_y < bottom
-            ):
-                return send_x, send_y, "coordinates"
+                return (left + right) // 2, (top + bottom) // 2
         raise ValueError(
-            "The Send coordinates do not point at a button of the SMS app. "
-            f"Recalibrate send_x and send_y. {_NOTHING_SENT}"
+            f"Cannot identify the Send button of the SMS app. {_NOTHING_SENT}"
         )

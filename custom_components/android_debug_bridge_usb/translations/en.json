@@ -16,7 +16,7 @@
     "step": {
       "init": {
         "title": "Default phone",
-        "description": "Choose the phone that actions use when they are called without a serial. The list shows every phone discovered so far, with its model once the phone has authorized USB debugging. Leave empty for no default: actions without a serial then work only while exactly one phone is connected.",
+        "description": "Choose the phone that actions use when no phone is selected in the action. The list shows every phone discovered so far, with its model once the phone has authorized USB debugging. Leave empty for no default: actions without a selected phone then work only while exactly one phone is connected.",
         "data": {
           "serial": "Default phone"
         }
@@ -29,7 +29,7 @@
   "issues": {
     "adb_unauthorized": {
       "title": "Phone {serial} has not authorized USB debugging",
-      "description": "The phone `{serial}` is connected over USB but does not trust this Home Assistant host, so actions will fail. Unlock the phone, run the `android_debug_bridge_usb.shell` action with the serial `{serial}` (for example with the command `id`), and accept **Allow USB debugging?** on the phone, ticking **Always allow from this computer**. This message disappears once the phone answers."
+      "description": "The phone `{serial}` is connected over USB but does not trust this Home Assistant host, so actions will fail. Unlock the phone, run the `android_debug_bridge_usb.shell` action on this phone (for example with the command `id`), and accept **Allow USB debugging?** on the phone, ticking **Always allow from this computer**. This message disappears once the phone answers."
     }
   }
 }

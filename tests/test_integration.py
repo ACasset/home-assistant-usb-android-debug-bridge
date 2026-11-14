@@ -20,10 +20,7 @@ from custom_components.android_debug_bridge_usb.const import DOMAIN
 PHONE = {"serial": "phone", "port_path": [1, 2]}
 SECOND = {"serial": "second", "port_path": [1, 3]}
 LISTED = PHONE | {"model": "Pixel 7"}
-SMS = {
-    "serial": "phone", "recipient": "+123456789", "message": "Internet down",
-    "send_x": 900, "send_y": 1800, "confirm_ui_risk": True,
-}
+SMS = {"recipient": "+123456789", "message": "Internet down", "confirm_ui_risk": True}
 
 
 class IntegrationTests(unittest.IsolatedAsyncioTestCase):
@@ -44,9 +41,7 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.devices.return_value = [PHONE]
         self.bridge.execute.return_value = Mock(output="Pixel\n", exit_code=0)
         self.bridge.probe.return_value = "Pixel 7"
-        self.bridge.send_sms.return_value = {
-            "send_button": "detected", "composer_cleared": True,
-        }
+        self.bridge.send_sms.return_value = {"composer_cleared": True}
         patcher = patch(
             "custom_components.android_debug_bridge_usb.Bridge",
             return_value=self.bridge,
@@ -56,6 +51,9 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         await self.hass.async_stop(force=True)
+
+    def device_id(self, serial="phone"):
+        return dr.async_get(self.hass).async_get_device({(DOMAIN, serial)}).id
 
     async def setup_hub(self):
         result = await self.hass.config_entries.flow.async_init(
@@ -114,14 +112,16 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_shell_response_validation_and_errors(self):
         await self.setup_hub()
-        data = {"serial": "phone", "command": "getprop ro.product.model"}
+        data = {"device_id": self.device_id(), "command": "getprop ro.product.model"}
         self.assertEqual(
             await self.call("shell", data), {"output": "Pixel\n", "exit_code": 0}
         )
         self.bridge.execute.assert_called_once_with("phone", "getprop ro.product.model")
         for invalid in ("", " ", "x" * 8193):
             with self.subTest(command=invalid[:10]), self.assertRaises(vol.Invalid):
-                await self.call("shell", {"serial": "phone", "command": invalid})
+                await self.call("shell", {"command": invalid})
+        with self.assertRaisesRegex(ServiceValidationError, "not a phone"):
+            await self.call("shell", {"device_id": "unknown", "command": "id"})
         self.bridge.execute.side_effect = ValueError("Device is missing")
         with self.assertRaisesRegex(ServiceValidationError, "Device is missing"):
             await self.call("shell", data)
@@ -133,7 +133,7 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_actions_require_admin_but_allow_automations(self):
         await self.setup_hub()
         for service, data in [
-            ("shell", {"serial": "phone", "command": "id"}),
+            ("shell", {"command": "id"}),
             ("list_devices", {}),
             ("send_sms", SMS),
         ]:
@@ -155,24 +155,16 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         await self.setup_hub()
         self.assertEqual(await self.call("send_sms", SMS), {
             "status": "send_button_tapped", "delivery_confirmed": False,
-            "send_button": "detected", "composer_cleared": True,
+            "composer_cleared": True,
         })
         self.bridge.send_sms.assert_called_once_with(
-            "phone", "+123456789", "Internet down", 900, 1800, 3, True,
-        )
-        without_coordinates = {
-            key: value for key, value in SMS.items() if key not in ("send_x", "send_y")
-        }
-        await self.call("send_sms", without_coordinates | {"verify_ui": False})
-        self.bridge.send_sms.assert_called_with(
-            "phone", "+123456789", "Internet down", None, None, 3, False,
+            "phone", "+123456789", "Internet down", 3,
         )
         for changes in [
             {"confirm_ui_risk": False},
             {"recipient": "123;reboot"},
-            {"send_x": -1},
-            {"send_y": 10001},
-            {"send_y": None},
+            {"send_x": 900, "send_y": 1800},
+            {"verify_ui": False},
             {"message": ""},
             {"wait_seconds": 11},
         ]:
@@ -236,7 +228,7 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(issues.async_get_issue(DOMAIN, "adb_unauthorized_phone"))
 
         # Approving the prompt during an action is reflected immediately.
-        await self.call("shell", {"serial": "phone", "command": "id"})
+        await self.call("shell", {"device_id": self.device_id(), "command": "id"})
         await self.hass.async_block_till_done()
         self.assertEqual(self.phone_state(sensor="adb_ready").state, "on")
         self.assertIsNone(issues.async_get_issue(DOMAIN, "adb_unauthorized_phone"))
@@ -266,7 +258,7 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.devices.return_value = [PHONE, SECOND]
         coordinator = await self.setup_hub()
         command = {"command": "id"}
-        sms = {key: value for key, value in SMS.items() if key != "serial"}
+        sms = SMS
 
         # Several phones and no default: nothing is guessed.
         for service, data in [("shell", command), ("send_sms", sms)]:
@@ -291,8 +283,8 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.execute.assert_called_with("second", "id")
         await self.call("send_sms", sms)
         self.assertEqual(self.bridge.send_sms.call_args.args[0], "second")
-        # An explicit serial wins, and an unplugged default is not replaced.
-        await self.call("shell", command | {"serial": "phone"})
+        # A selected phone wins, and an unplugged default is not replaced.
+        await self.call("shell", command | {"device_id": self.device_id("phone")})
         self.bridge.execute.assert_called_with("phone", "id")
         self.bridge.devices.return_value = [PHONE]
         await coordinator.async_refresh()
@@ -327,7 +319,7 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.entry.state, ConfigEntryState.SETUP_RETRY)
         # Actions stay registered and explain the problem instead of being unknown.
         for service, data in [
-            ("shell", {"serial": "phone", "command": "id"}),
+            ("shell", {"command": "id"}),
             ("list_devices", {}),
             ("send_sms", SMS),
         ]:

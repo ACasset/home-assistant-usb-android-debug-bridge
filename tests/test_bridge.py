@@ -416,9 +416,7 @@ class BridgeTests(unittest.TestCase):
             "android.view.View", (957, 1085, 999, 1127), resource_id="STATUS_SENDING",
             clickable=False,
         )
-        self.assertEqual(
-            self.send(phone)["send_button"], "detected",
-        )
+        self.assertEqual(self.send(phone), {"composer_cleared": True})
         self.assertEqual(phone.taps, [(950, 1800)])
 
     def test_sms_quotes_message_and_taps_detected_button(self):
@@ -426,7 +424,7 @@ class BridgeTests(unittest.TestCase):
         phone = FakePhone()
         self.assertEqual(
             self.send(phone, message, wait_seconds=4),
-            {"send_button": "detected", "composer_cleared": True},
+            {"composer_cleared": True},
         )
         self.assertEqual(phone.commands[0], "input keyevent KEYCODE_WAKEUP")
         self.assertEqual(shlex.split(phone.commands[2]), [
@@ -447,15 +445,13 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(keys[0].split()[2:], ["67"] * 15 + ["112"] * 15)
         self.assertEqual(phone.taps[0], (400, 1800))
 
-    def test_sms_coordinates_are_a_verified_fallback(self):
-        self.assertEqual(
-            self.send(FakePhone(send_id=""), send_x=900, send_y=1800),
-            {"send_button": "coordinates", "composer_cleared": True},
-        )
-        for coordinates in [{}, {"send_x": 500, "send_y": 500}, {"send_x": 400, "send_y": 1800}]:
-            phone = FakePhone(send_id="")
-            with self.subTest(coordinates=coordinates), self.assertRaisesRegex(ValueError, "Nothing was sent"):
-                self.send(phone, **coordinates)
+    def test_sms_aborts_when_send_button_is_not_identified(self):
+        for send_id in ["", "com.sms:id/STATUS_SENDING"]:
+            phone = FakePhone(send_id=send_id)
+            with self.subTest(send_id=send_id), self.assertRaisesRegex(
+                ValueError, "Cannot identify the Send button.*Nothing was sent"
+            ):
+                self.send(phone)
             self.assertEqual(phone.taps, [])
 
     def test_sms_aborts_without_tapping_when_screen_is_not_as_expected(self):
@@ -467,7 +463,7 @@ class BridgeTests(unittest.TestCase):
             FakePhone(draft="x" * 2001),
         ]:
             with self.subTest(phone=vars(phone)), self.assertRaisesRegex(ValueError, "Nothing was sent"):
-                self.send(phone, send_x=900, send_y=1800)
+                self.send(phone)
             self.assertEqual(phone.taps, [])
 
     def test_sms_reports_message_left_in_composer(self):
@@ -475,15 +471,6 @@ class BridgeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "still in the composer"):
             self.send(phone)
         self.assertEqual(len(phone.taps), 1)
-
-    def test_sms_without_ui_verification_taps_coordinates_blindly(self):
-        phone = FakePhone(prefill=False)
-        self.assertEqual(
-            self.send(phone, send_x=900, send_y=1800, verify_ui=False),
-            {"send_button": "coordinates", "composer_cleared": None},
-        )
-        self.assertEqual(phone.taps, [(900, 1800)])
-        self.assertFalse(any("uiautomator" in c for c in phone.commands))
 
     def test_sms_failure_does_not_tap_or_retry(self):
         for responses in [
@@ -498,7 +485,7 @@ class BridgeTests(unittest.TestCase):
                 patch.object(bridge.time, "sleep"),
             ):
                 with self.assertRaises(ValueError):
-                    self.bridge.send_sms("phone", "+123456789", "Outage", 900, 1800, 3)
+                    self.bridge.send_sms("phone", "+123456789", "Outage", 3)
                 self.assertEqual(shell.call_count, len(responses))
 
     def test_sms_usb_failures_are_retried_only_when_nothing_can_be_sent(self):
@@ -568,7 +555,7 @@ class BridgeTests(unittest.TestCase):
 
         with self.assertLogs("bridge", level="WARNING"):
             result = self.send(after_tap)
-        self.assertEqual(result, {"send_button": "detected", "composer_cleared": None})
+        self.assertEqual(result, {"composer_cleared": None})
         self.assertEqual(phone.sent, ["Outage"])
 
     def test_sms_invalid_inputs_never_touch_phone(self):
@@ -578,16 +565,11 @@ class BridgeTests(unittest.TestCase):
             {"message": " "},
             {"message": "x" * 1601},
             {"message": "hello\0world"},
-            {"send_x": -1},
-            {"send_y": 10001},
             {"wait_seconds": 0},
             {"wait_seconds": 11},
-            {"send_x": None},
-            {"send_x": None, "send_y": None, "verify_ui": False},
         ]:
             data = dict(
-                serial="phone", recipient="+123456789", message="Outage",
-                send_x=900, send_y=1800, wait_seconds=3,
+                serial="phone", recipient="+123456789", message="Outage", wait_seconds=3,
             )
             data.update(overrides)
             with self.subTest(overrides=overrides), patch.object(self.bridge, "execute") as shell:
