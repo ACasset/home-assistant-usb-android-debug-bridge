@@ -259,3 +259,17 @@ also be verified on the Home Assistant host with a connected phone.
 GitHub Actions runs these tests, Home Assistant's `hassfest` and the HACS
 validation on every pull request, on pushes to `main`, and weekly. The HACS
 validation skips the license check because the repository has no license yet.
+Wait for the pull request checks to finish before merging and deleting the
+branch: a run whose branch disappears while it is starting is reported as failed
+("workflow file issue") even though nothing is wrong with the workflow.
+
+### Releasing
+
+HACS shows the version of a GitHub release, and commit hashes when there is none.
+To release, set the same version in `custom_components/android_debug_bridge_usb/manifest.json`
+and in a tag, then publish a release for that tag:
+
+```sh
+git tag v0.5.0 && git push origin v0.5.0
+gh release create v0.5.0 --generate-notes
+```

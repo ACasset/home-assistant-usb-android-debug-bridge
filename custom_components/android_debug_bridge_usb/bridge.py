@@ -530,17 +530,6 @@ class Bridge:
             bounds for node, bounds in usable
             if _SEND_ID.search(node.get("resource-id", "").rpartition("/")[2])
         }
-        if not detected:
-            # Fallback on the (localized) label, e.g. "Envoyer" on a French phone.
-            detected = {
-                bounds for node, bounds in usable
-                if node.get("clickable") == "true"
-                and re.fullmatch(
-                    r"(send|envoyer)( sms| message| le message)?",
-                    (node.get("content-desc") or node.get("text") or "").strip(),
-                    re.IGNORECASE,
-                )
-            }
         if detected:
             left, top, right, bottom = min(
                 detected, key=lambda b: (b[2] - b[0]) * (b[3] - b[1])
