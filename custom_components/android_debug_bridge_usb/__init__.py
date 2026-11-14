@@ -6,7 +6,7 @@ from pathlib import Path
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
+from homeassistant.const import ATTR_DEVICE_ID, Platform
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import (
     ConfigEntryNotReady,
@@ -19,7 +19,7 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
 from .bridge import Bridge
-from .const import CONF_SERIAL, DOMAIN
+from .const import DOMAIN
 from .coordinator import UsbCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     async def async_shell(call: ServiceCall) -> dict:
         coordinator = await _async_hub(hass, call)
         try:
-            serial = coordinator.resolve_serial(call.data.get(CONF_SERIAL))
+            serial = coordinator.resolve_serial(call.data.get(ATTR_DEVICE_ID))
             result = await hass.async_add_executor_job(
                 coordinator.bridge.execute, serial, call.data["command"]
             )
@@ -86,16 +86,13 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     async def async_send_sms(call: ServiceCall) -> dict:
         coordinator = await _async_hub(hass, call)
         try:
-            serial = coordinator.resolve_serial(call.data.get(CONF_SERIAL))
+            serial = coordinator.resolve_serial(call.data.get(ATTR_DEVICE_ID))
             details = await hass.async_add_executor_job(
                 coordinator.bridge.send_sms,
                 serial,
                 call.data["recipient"],
                 call.data["message"],
-                call.data.get("send_x"),
-                call.data.get("send_y"),
                 call.data["wait_seconds"],
-                call.data["verify_ui"],
             )
         except ValueError as err:
             raise ServiceValidationError(str(err)) from err
@@ -113,7 +110,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         "shell",
         async_shell,
         schema=vol.Schema({
-            vol.Optional(CONF_SERIAL): vol.All(cv.string, vol.Length(min=1)),
+            vol.Optional(ATTR_DEVICE_ID): vol.All(cv.string, vol.Length(min=1)),
             vol.Required("command"): vol.All(
                 cv.string, vol.Length(min=1, max=8192),
                 vol.Match(r"[\s\S]*\S[\s\S]*"),
@@ -128,24 +125,20 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         schema=vol.Schema({}),
         supports_response=SupportsResponse.ONLY,
     )
-    coordinate = vol.All(vol.Coerce(int), vol.Range(min=0, max=10000))
     hass.services.async_register(
         DOMAIN,
         "send_sms",
         async_send_sms,
         schema=vol.Schema({
-            vol.Optional(CONF_SERIAL): vol.All(cv.string, vol.Length(min=1)),
+            vol.Optional(ATTR_DEVICE_ID): vol.All(cv.string, vol.Length(min=1)),
             vol.Required("recipient"): vol.All(cv.string, vol.Match(r"^\+?[0-9]{3,15}$")),
             vol.Required("message"): vol.All(
                 cv.string, vol.Length(min=1, max=1600),
                 vol.Match(r"[\s\S]*\S[\s\S]*"),
             ),
-            vol.Inclusive("send_x", "coordinates"): coordinate,
-            vol.Inclusive("send_y", "coordinates"): coordinate,
             vol.Optional("wait_seconds", default=3): vol.All(
                 vol.Coerce(float), vol.Range(min=1, max=10),
             ),
-            vol.Optional("verify_ui", default=True): cv.boolean,
             vol.Required("confirm_ui_risk"): vol.In([True]),
         }),
         supports_response=SupportsResponse.OPTIONAL,

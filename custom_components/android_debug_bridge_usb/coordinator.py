@@ -34,17 +34,28 @@ class UsbCoordinator(DataUpdateCoordinator[dict[str, UsbDevice]]):
         self._probed_at: dict[str, float] = {}
         self._ignored: tuple | None = None
 
-    def resolve_serial(self, serial: str | None) -> str:
-        """Return the phone an action targets: explicit, default, or the only one."""
-        serial = serial or self.config_entry.options.get(CONF_SERIAL)
-        if serial:
+    def resolve_serial(self, device_id: str | None) -> str:
+        """Return the phone an action targets: selected, default, or the only one."""
+        if device_id:
+            device = dr.async_get(self.hass).async_get(device_id)
+            serials = [
+                serial for domain, serial in (device.identifiers if device else ())
+                if domain == DOMAIN
+            ]
+            if not serials:
+                raise ValueError(
+                    f"Device {device_id!r} is not a phone of the Android Debug Bridge "
+                    "USB integration. Select a phone in the action."
+                )
+            return serials[0]
+        if serial := self.config_entry.options.get(CONF_SERIAL):
             return serial
         if self.data and len(self.data) == 1:
             return next(iter(self.data))
         raise ValueError(
             f"No phone selected and {len(self.data or ())} phones are connected. "
             "Choose a default phone with Configure on the Android Debug Bridge USB "
-            "integration, or pass a serial."
+            "integration, or select a phone in the action."
         )
 
     async def _async_update_data(self) -> dict[str, UsbDevice]:

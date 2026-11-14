@@ -5,14 +5,15 @@ shell:
     required for user-initiated calls. Returns output and exit_code when a
     response is requested.
   fields:
-    serial:
-      name: Serial
+    device_id:
+      name: Phone
       description: >-
-        Exact USB serial of the phone. Leave empty to use the default phone
+        Phone discovered by the integration. Leave empty to use the default phone
         chosen in the integration's options, or the only connected phone.
-      example: ABC123
       selector:
-        text:
+        device:
+          filter:
+            integration: android_debug_bridge_usb
     command:
       name: Command
       description: Android shell command without the adb shell prefix (1-8192 characters).
@@ -35,13 +36,15 @@ send_sms:
     check that the composer emptied. Requires an unlocked phone and a configured
     SMS app/SIM. Does not confirm delivery. Test on your phone before automating.
   fields:
-    serial:
-      name: Serial
+    device_id:
+      name: Phone
       description: >-
-        Exact USB serial of the phone. Leave empty to use the default phone
+        Phone discovered by the integration. Leave empty to use the default phone
         chosen in the integration's options, or the only connected phone.
       selector:
-        text:
+        device:
+          filter:
+            integration: android_debug_bridge_usb
     recipient:
       name: Recipient
       description: One number, 3-15 digits, optionally prefixed with +.
@@ -54,24 +57,6 @@ send_sms:
       selector:
         text:
           multiline: true
-    send_x:
-      name: Send button X coordinate
-      description: >-
-        Fallback used when the Send button cannot be identified on screen; it
-        must then point at a button of the SMS app. Required if Verify screen is off.
-      selector:
-        number:
-          min: 0
-          max: 10000
-          mode: box
-    send_y:
-      name: Send button Y coordinate
-      description: Provide together with the X coordinate.
-      selector:
-        number:
-          min: 0
-          max: 10000
-          mode: box
     wait_seconds:
       name: Composer wait time
       default: 3
@@ -80,14 +65,6 @@ send_sms:
           min: 1
           max: 10
           mode: box
-    verify_ui:
-      name: Verify screen
-      description: >-
-        Read the screen before and after tapping. Turn off only if screen reading
-        does not work on your phone: the coordinates are then tapped blindly.
-      default: true
-      selector:
-        boolean:
     confirm_ui_risk:
       name: Accept UI automation risk
       description: >-
